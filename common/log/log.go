@@ -2,6 +2,9 @@ package log
 
 import (
 	"fmt"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"runtime"
 	"time"
 )
@@ -53,6 +56,9 @@ func PrintMemoryStatsInBackground() {
 				printMemUsage()
 			}
 		}
+	}()
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 }
 

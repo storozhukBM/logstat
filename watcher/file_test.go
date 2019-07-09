@@ -57,8 +57,8 @@ func TestFileReader(t *testing.T) {
 	appendToFile(t, tmpFile, []byte("third line"))
 	{
 		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte("third line"), line, "can't read line")
 		test.FailOnError(t, lineErr)
+		test.Equals(t, []byte("third line"), line, "can't read line")
 	}
 	{
 		line, lineErr := reader.ReadOneLineAsSlice()

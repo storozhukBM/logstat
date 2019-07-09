@@ -32,6 +32,7 @@ type FileReader struct {
 	readerBufSize uint
 
 	initialized          bool
+	endReached           bool
 	currentOffset        int64
 	currentFile          *os.File
 	currentReader        *bufio.Reader
@@ -46,6 +47,8 @@ func NewFileReader(fileName string, readerBufSize uint) (*FileReader, error) {
 		fileName:             fileName,
 		readerBufSize:        cmp.MaxUInt(readerBufSize, minBufSize),
 		overflowForLongLines: bytes.NewBuffer(nil),
+
+		endReached: true,
 	}
 	return result, nil
 }
@@ -67,8 +70,11 @@ func (f *FileReader) ReadOneLineAsSlice() ([]byte, error) {
 	for {
 		line, isPrefix, readErr := f.currentReader.ReadLine()
 		if readErr != nil {
+			f.endReached = readErr == io.EOF
 			return nil, readErr
 		}
+		f.endReached = false
+
 		f.currentOffset += int64(len(line))
 
 		if isPrefix {
@@ -89,6 +95,9 @@ func (f *FileReader) prepareFileReadAndDetectRotation() error {
 	fileInitializationErr := f.openAndInitializeFile()
 	if fileInitializationErr != nil {
 		return fileInitializationErr
+	}
+	if !f.endReached {
+		return nil
 	}
 	size, fileErr := f.checkTargetFileSize()
 	if fileErr != nil {
