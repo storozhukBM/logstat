@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+type lineReader interface {
+	ReadOneLineAsSlice() ([]byte, error)
+}
+
 /*
 Component used to stream new lines from file to output channel of bytes.
 It starts separate goroutine to track file changes.
@@ -25,34 +29,35 @@ to avoid copying and pressure on GC. This view is only valid before the next
 line is fetched from channel. If you need some parts of it to remain accessible,
 copy required parts.
 - you should cancel associated context to free all attached resources.
+
+Future:
+This solution is too straightforward and can have bad latency and energy efficiency
+capabilities. In future it can be replace by some specialized library with usage of
+fsnotify.
 */
 type LogFileWatcher struct {
 	ctx           context.Context
 	pollPeriod    time.Duration
 	backOffRandom *rand.Rand
-
-	reader *fileReader
+	reader        lineReader
 
 	output chan []byte
 }
 
-func NewLogFileWatcher(ctx context.Context, fileName string, readerBufSize uint, pollPeriod time.Duration) (*LogFileWatcher, error) {
-	if fileName == "" {
-		return nil, fmt.Errorf("fileName can't be empty")
-	}
+func NewLogFileWatcher(ctx context.Context, reader lineReader, pollPeriod time.Duration) (*LogFileWatcher, error) {
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("ctx is already closed")
 	}
-	reader, readerErr := newFileReader(fileName, readerBufSize)
-	if readerErr != nil {
-		return nil, readerErr
+	if reader == nil {
+		return nil, fmt.Errorf("reader can't be nil")
 	}
 	result := &LogFileWatcher{
 		ctx:           ctx,
 		pollPeriod:    pollPeriod,
 		backOffRandom: rand.New(rand.NewSource(time.Now().Unix())),
 		reader:        reader,
-		output:        make(chan []byte),
+
+		output: make(chan []byte),
 	}
 	go result.run()
 	return result, nil
@@ -64,10 +69,7 @@ func (l *LogFileWatcher) Output() <-chan []byte {
 
 func (l *LogFileWatcher) run() {
 	defer func() {
-		closeErr := l.reader.close()
-		if closeErr != nil {
-			log.Error("can't close file reader: %v", closeErr)
-		}
+		log.Debug("closing watcher channel")
 		close(l.output)
 	}()
 
@@ -84,8 +86,10 @@ func (l *LogFileWatcher) run() {
 
 func (l *LogFileWatcher) cycle() error {
 	defer panicHandle()
+	log.Debug("cycle start")
 	for {
-		slice, readErr := l.reader.readOneLineAsSlice()
+		log.Debug("cycle iteration")
+		slice, readErr := l.reader.ReadOneLineAsSlice()
 		if readErr == io.EOF {
 			return nil
 		}
@@ -109,6 +113,7 @@ func panicHandle() {
 }
 
 func (l *LogFileWatcher) wait() {
+	log.Debug("waiting for changes: %v", l.pollPeriod)
 	select {
 	case <-time.After(l.pollPeriod):
 	case <-l.ctx.Done():
@@ -117,6 +122,7 @@ func (l *LogFileWatcher) wait() {
 
 func (l *LogFileWatcher) waitOnError() {
 	multiplier := time.Duration(l.backOffRandom.Intn(8) + 2)
+	log.Debug("waiting after error: %v", multiplier*l.pollPeriod)
 	select {
 	case <-time.After(multiplier * l.pollPeriod):
 	case <-l.ctx.Done():

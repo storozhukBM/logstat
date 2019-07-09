@@ -16,63 +16,53 @@ const minBufSize = 4 * 1024
 Component used to read new lines from file
 
 Responsibilities:
- - open file and close target file
+ - open file and Close target file
  - track current reading offset
  - detect that file was rotated and start from the beginning of the new file
 
 Attention:
- - `readOneLineAsSlice` returns a view to internal reading buffer
+ - `ReadOneLineAsSlice` returns a view to internal reading buffer
 to avoid copying and pressure on GC. This view is only valid before the next
-`readOneLineAsSlice` call. If you need some parts of it to remain accessible,
+`ReadOneLineAsSlice` call. If you need some parts of it to remain accessible,
 copy required parts.
-- call `close` function to free managed resources
+- call `Close` function to free managed resources
 */
-type fileReader struct {
+type FileReader struct {
 	fileName      string
 	readerBufSize uint
 
-	initialized   bool
-	currentOffset int64
-	currentFile   *os.File
-	currentReader *bufio.Reader
-	// we use pool here to avoid one time allocation of huge buffer that wont be used in the future
-	//overflowBufferForLongLines sync.Pool
-	overflowBufferForLongLines *bytes.Buffer
+	initialized          bool
+	currentOffset        int64
+	currentFile          *os.File
+	currentReader        *bufio.Reader
+	overflowForLongLines *bytes.Buffer
 }
 
-func newFileReader(fileName string, readerBufSize uint) (*fileReader, error) {
+func NewFileReader(fileName string, readerBufSize uint) (*FileReader, error) {
 	if fileName == "" {
 		return nil, fmt.Errorf("fileName can't be empty")
 	}
-	result := &fileReader{
-		fileName:      fileName,
-		readerBufSize: cmp.MaxUInt(readerBufSize, minBufSize),
-		//overflowBufferForLongLines: sync.Pool{New: func() interface{} {
-		//	return bytes.NewBuffer(nil)
-		//}},
-		overflowBufferForLongLines: bytes.NewBuffer(nil),
+	result := &FileReader{
+		fileName:             fileName,
+		readerBufSize:        cmp.MaxUInt(readerBufSize, minBufSize),
+		overflowForLongLines: bytes.NewBuffer(nil),
 	}
 	return result, nil
 }
 
-func (f *fileReader) close() error {
+func (f *FileReader) Close() error {
 	if f.currentFile != nil {
 		return f.currentFile.Close()
 	}
 	return nil
 }
 
-func (f *fileReader) readOneLineAsSlice() ([]byte, error) {
+func (f *FileReader) ReadOneLineAsSlice() ([]byte, error) {
 	fileErr := f.prepareFileReadAndDetectRotation()
 	if fileErr != nil {
 		return nil, fileErr
 	}
-	overflowBuffer := f.overflowBufferForLongLines
-	//overflowBuffer := f.overflowBufferForLongLines.Get().(*bytes.Buffer)
-	//defer func() {
-	//	f.overflowBufferForLongLines.Put(overflowBuffer)
-	//}()
-	overflowBuffer.Reset()
+	f.overflowForLongLines.Reset()
 	returnOverflow := false
 	for {
 		line, isPrefix, readErr := f.currentReader.ReadLine()
@@ -82,20 +72,20 @@ func (f *fileReader) readOneLineAsSlice() ([]byte, error) {
 		f.currentOffset += int64(len(line))
 
 		if isPrefix {
-			log.Debug("using overflow buf: %v; bufSize: %v", f.fileName, overflowBuffer.Cap())
-			overflowBuffer.Write(line)
+			log.Debug("using overflow buf: %v; bufSize: %v", f.fileName, f.overflowForLongLines.Cap())
+			f.overflowForLongLines.Write(line)
 			returnOverflow = true
 			continue
 		}
 		if returnOverflow {
-			overflowBuffer.Write(line)
-			return overflowBuffer.Bytes(), nil
+			f.overflowForLongLines.Write(line)
+			return f.overflowForLongLines.Bytes(), nil
 		}
 		return line, nil
 	}
 }
 
-func (f *fileReader) prepareFileReadAndDetectRotation() error {
+func (f *FileReader) prepareFileReadAndDetectRotation() error {
 	fileInitializationErr := f.openAndInitializeFile()
 	if fileInitializationErr != nil {
 		return fileInitializationErr
@@ -111,7 +101,7 @@ func (f *fileReader) prepareFileReadAndDetectRotation() error {
 	log.Debug("file was rotated going to reopen: %v", f.fileName)
 
 	prevFile := f.currentFile
-	defer log.OnError(prevFile.Close, "can't close file: %v", f.fileName)
+	defer log.OnError(prevFile.Close, "can't Close file: %v", f.fileName)
 	f.currentOffset = 0
 	f.currentReader = nil
 	f.currentFile = nil
@@ -119,7 +109,7 @@ func (f *fileReader) prepareFileReadAndDetectRotation() error {
 	return reopenFileErr
 }
 
-func (f *fileReader) openAndInitializeFile() error {
+func (f *FileReader) openAndInitializeFile() error {
 	if f.currentFile != nil {
 		return nil
 	}
@@ -158,7 +148,7 @@ func (f *fileReader) openAndInitializeFile() error {
 	return nil
 }
 
-func (f *fileReader) checkTargetFileSize() (int64, error) {
+func (f *FileReader) checkTargetFileSize() (int64, error) {
 	fileInfo, fileStatErr := f.currentFile.Stat()
 	if fileStatErr != nil {
 		return 0, fileStatErr
