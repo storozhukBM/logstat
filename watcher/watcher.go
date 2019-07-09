@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/storozhukBM/logstat/common/log"
+	"github.com/storozhukBM/logstat/common/pnc"
 	"io"
 	"math/rand"
-	"runtime/debug"
 	"time"
 )
 
@@ -85,10 +85,8 @@ func (l *LogFileWatcher) run() {
 }
 
 func (l *LogFileWatcher) cycle() error {
-	defer panicHandle()
-	log.Debug("cycle start")
+	defer pnc.PanicHandle()
 	for {
-		log.Debug("cycle iteration")
 		slice, readErr := l.reader.ReadOneLineAsSlice()
 		if readErr == io.EOF {
 			return nil
@@ -104,16 +102,7 @@ func (l *LogFileWatcher) cycle() error {
 	}
 }
 
-func panicHandle() {
-	r := recover()
-	if r != nil {
-		log.Error("panic happened: %+v", r)
-		debug.PrintStack()
-	}
-}
-
 func (l *LogFileWatcher) wait() {
-	log.Debug("waiting for changes: %v", l.pollPeriod)
 	select {
 	case <-time.After(l.pollPeriod):
 	case <-l.ctx.Done():
@@ -122,7 +111,6 @@ func (l *LogFileWatcher) wait() {
 
 func (l *LogFileWatcher) waitOnError() {
 	multiplier := time.Duration(l.backOffRandom.Intn(8) + 2)
-	log.Debug("waiting after error: %v", multiplier*l.pollPeriod)
 	select {
 	case <-time.After(multiplier * l.pollPeriod):
 	case <-l.ctx.Done():

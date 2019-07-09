@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"github.com/storozhukBM/logstat/adapter/w3c"
 	"github.com/storozhukBM/logstat/common/log"
+	"github.com/storozhukBM/logstat/stat"
 	"github.com/storozhukBM/logstat/watcher"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -27,11 +31,21 @@ func main() {
 		log.Error("%v", watcherErr)
 		return
 	}
-	count := 0
-	for line := range fileWatcher.Output() {
-		count += len(line) % 10
-		if count%10 == 0 {
-			fmt.Printf("%v\n", count)
-		}
+
+	storage, storageErr := stat.NewStatsStorage()
+	if storageErr != nil {
+		log.Error("%v", storageErr)
+		return
 	}
+
+	_, adapterErr := w3c.NewW3CLogToStoreAdapter(fileWatcher, storage, 100)
+	if adapterErr != nil {
+		log.Error("%v", adapterErr)
+		return
+	}
+
+	stopCh := make(chan os.Signal)
+	defer close(stopCh)
+	signal.Notify(stopCh, syscall.SIGTERM, syscall.SIGINT)
+	<-stopCh
 }
