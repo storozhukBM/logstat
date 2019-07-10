@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"github.com/storozhukBM/logstat/alert"
 	"github.com/storozhukBM/logstat/common/log"
 	"github.com/storozhukBM/logstat/parser/w3c"
 	"github.com/storozhukBM/logstat/stat"
+	"github.com/storozhukBM/logstat/view"
 	"github.com/storozhukBM/logstat/watcher"
 	"os"
 	"os/signal"
@@ -38,7 +40,7 @@ func main() {
 		return
 	}
 
-	storage, storageErr := stat.NewStatsStorage()
+	storage, storageErr := stat.NewStorage(10, 10)
 	if storageErr != nil {
 		log.Error("%v", storageErr)
 		return
@@ -46,6 +48,32 @@ func main() {
 	_, adapterErr := stat.NewLogToStoreAdapter(fileWatcher, storage, parser)
 	if adapterErr != nil {
 		log.Error("%v", adapterErr)
+		return
+	}
+
+	trafficAlert, trafficAlertErr := alert.NewTrafficState(
+		120, 10, 10, 10,
+	)
+	if trafficAlertErr != nil {
+		log.Error("%v", trafficAlertErr)
+		return
+	}
+
+	stdOutView, viewErr := view.NewIOView(applicationCtx, 10*time.Second, os.Stdout)
+	if viewErr != nil {
+		log.Error("%v", viewErr)
+		return
+	}
+
+	_, alertSubscriptionErr := alert.NewAlertsSubscription(trafficAlert, stdOutView.TrafficAlert)
+	if alertSubscriptionErr != nil {
+		log.Error("%v", alertSubscriptionErr)
+		return
+	}
+
+	_, statReportSubscriptionErr := stat.NewReportSubscription(storage, trafficAlert.Store, stdOutView.Report)
+	if statReportSubscriptionErr != nil {
+		log.Error("%v", statReportSubscriptionErr)
 		return
 	}
 

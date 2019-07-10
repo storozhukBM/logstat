@@ -13,6 +13,7 @@ import (
 const defaultTimeout = 15 * time.Millisecond
 
 func TestLogFileWatcher(t *testing.T) {
+	t.Parallel()
 	reader := newFileReaderMock()
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
@@ -33,6 +34,7 @@ func TestLogFileWatcher(t *testing.T) {
 	waitTillTimeout(t, watcher)
 
 	ctxCancel()
+	time.Sleep(defaultTimeout)
 	_, watcherOpen := <-watcher.Output()
 	test.Equals(t, false, watcherOpen, "watcher should be closed with ctx")
 }
@@ -48,6 +50,7 @@ func TestLogFileWatcherCloseChannelOnWriteBlock(t *testing.T) {
 
 	reader.lines <- []byte("first")
 	ctxCancel()
+	time.Sleep(defaultTimeout)
 	_, watcherOpen := <-watcher.Output()
 	test.Equals(t, false, watcherOpen, "watcher should be closed with ctx")
 }

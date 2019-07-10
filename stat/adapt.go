@@ -48,22 +48,16 @@ func NewLogToStoreAdapter(log logSource, store store, parser parser) (*LogToStor
 
 func (a *LogToStoreAdapter) run() {
 	input := a.lineProvider.Output()
-	for {
-		_, opened := <-input
-		if !opened {
-			return
-		}
-		a.cycle(input)
-	}
-}
-func (a *LogToStoreAdapter) cycle(input <-chan []byte) {
-	defer pnc.PanicHandle()
 	for line := range input {
-		record, parseErr := a.parser.Parse(line)
-		if parseErr != nil {
-			log.WithError(parseErr, "can't parse line")
-			continue
-		}
-		a.store.Store(record)
+		// move to separate function for panic handling
+		func() {
+			defer pnc.PanicHandle()
+			record, parseErr := a.parser.Parse(line)
+			if parseErr != nil {
+				log.WithError(parseErr, "can't parse line")
+				return
+			}
+			a.store.Store(record)
+		}()
 	}
 }

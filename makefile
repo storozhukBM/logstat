@@ -13,10 +13,13 @@ build:
 	$(GOBUILD) -o $(BINARYNAME)
 
 test:
-	$(GOTEST) -race ./...
+	$(GOTEST) ./...
+
+race:
+	$(GOTEST) -race -count=1000 ./...
 
 coverage: clean
-	$(GOTEST) -coverpkg=./... -coverprofile=$(COVERAGENAME) ./... && go tool cover -html=$(COVERAGENAME)
+	$(GOTEST) -coverprofile=$(COVERAGENAME) ./... && go tool cover -html=$(COVERAGENAME)
 
 clean:
 	$(GOLEAN)

@@ -1,0 +1,158 @@
+package alert
+
+import (
+	"fmt"
+	"github.com/storozhukBM/logstat/common/log"
+	"github.com/storozhukBM/logstat/stat"
+)
+
+type TrafficState struct {
+	windowDurationInSeconds int64
+	reportsCycleInSeconds   int64
+	maxTrafficInWindow      uint64
+
+	requestsInWindow             uint64
+	lastReportCycleStartUnixTime int64
+	reportsRing                  *trafficEvictingQueue
+
+	alertsCount uint64
+	current     *TrafficAlert
+	alertsRing  chan TrafficAlert
+}
+
+func NewTrafficState(windowDurationInSeconds uint64, reportsCycleInSeconds uint64, maxTrafficInWindow uint64, alertRingSize uint) (*TrafficState, error) {
+	slotsSize := windowDurationInSeconds / reportsCycleInSeconds
+	if slotsSize < 1 {
+		return nil, fmt.Errorf("mismatched configuration of windowDurationInSeconds and reportsCycleInSeconds")
+	}
+	if slotsSize > 4096 {
+		return nil, fmt.Errorf("windowDurationInSeconds is too big for such report cycle size")
+	}
+	if alertRingSize < 1 {
+		return nil, fmt.Errorf("alertRingSize should be at least 1")
+	}
+	result := &TrafficState{
+		windowDurationInSeconds: int64(windowDurationInSeconds),
+		reportsCycleInSeconds:   int64(reportsCycleInSeconds),
+		maxTrafficInWindow:      maxTrafficInWindow,
+
+		requestsInWindow:             0,
+		lastReportCycleStartUnixTime: 0,
+		reportsRing:                  newTrafficRing(int(slotsSize)),
+
+		alertsRing: make(chan TrafficAlert, alertRingSize),
+	}
+	return result, nil
+}
+
+func (s *TrafficState) Alerts() <-chan TrafficAlert {
+	return s.alertsRing
+}
+
+func (s *TrafficState) Store(report stat.Report) {
+	if s.reportsCycleInSeconds != report.CycleDurationInSeconds {
+		log.Error(
+			"expected cycle size: %v; actual cycle size: %v",
+			s.reportsCycleInSeconds, report.CycleDurationInSeconds,
+		)
+		return
+	}
+
+	windowStartUnixTime := report.CycleStartUnixTime - s.windowDurationInSeconds
+	for {
+		head, ok := s.reportsRing.getHead()
+		if !ok || head.cycleStartUnixTime >= windowStartUnixTime {
+			break
+		}
+		s.requestsInWindow -= head.cycleRequests
+		s.reportsRing.removeHead()
+	}
+
+	s.reportsRing.pushToTail(trafficSlot{cycleRequests: report.TotalRequests, cycleStartUnixTime: report.CycleStartUnixTime})
+	s.requestsInWindow += report.TotalRequests
+	s.lastReportCycleStartUnixTime = report.CycleStartUnixTime
+	s.checkForAlertsViolation(report)
+}
+
+func (s *TrafficState) checkForAlertsViolation(report stat.Report) {
+	if s.requestsInWindow >= s.maxTrafficInWindow {
+		s.alertsCount++
+		s.current = &TrafficAlert{
+			AlertID:                  s.alertsCount,
+			Resolved:                 false,
+			MaxAllowedRequests:       s.maxTrafficInWindow,
+			ObservedInWindowRequests: s.requestsInWindow,
+			WindowStartUnixTime:      report.CycleStartUnixTime - s.windowDurationInSeconds,
+			WindowEndUnixTime:        report.CycleStartUnixTime,
+		}
+		s.pushAlertToRing(*s.current)
+		return
+	}
+	if s.current == nil {
+		return
+	}
+	s.pushAlertToRing(TrafficAlert{
+		AlertID:                  s.current.AlertID,
+		Resolved:                 true,
+		MaxAllowedRequests:       s.maxTrafficInWindow,
+		ObservedInWindowRequests: s.requestsInWindow,
+		WindowStartUnixTime:      report.CycleStartUnixTime - s.windowDurationInSeconds,
+		WindowEndUnixTime:        report.CycleStartUnixTime,
+	})
+	s.current = nil
+}
+
+func (s *TrafficState) pushAlertToRing(a TrafficAlert) {
+	select {
+	case s.alertsRing <- a:
+	default:
+		oldAlert := <-s.alertsRing
+		log.Error("[ALERT] TrafficAlert wasn't consumed from TrafficStateAlert: %+v", oldAlert)
+		s.alertsRing <- a
+	}
+}
+
+type trafficSlot struct {
+	cycleRequests      uint64
+	cycleStartUnixTime int64
+}
+
+type trafficEvictingQueue struct {
+	ring []trafficSlot
+	head int
+	tail int
+}
+
+func newTrafficRing(size int) *trafficEvictingQueue {
+	return &trafficEvictingQueue{ring: make([]trafficSlot, size)}
+}
+
+func (q *trafficEvictingQueue) getHead() (trafficSlot, bool) {
+	if q.tail == q.head {
+		return trafficSlot{}, false
+	}
+	head := q.ring[q.head]
+	return head, true
+}
+
+func (q *trafficEvictingQueue) removeHead() (trafficSlot, bool) {
+	if q.tail == q.head {
+		return trafficSlot{}, false
+	}
+	head := q.ring[q.head]
+	q.moveHead()
+	return head, true
+}
+
+func (q *trafficEvictingQueue) pushToTail(slot trafficSlot) {
+	q.ring[q.tail] = slot
+	q.moveTail()
+}
+
+func (q *trafficEvictingQueue) moveHead() {
+	q.head = (q.head + 1) % len(q.ring)
+}
+
+func (q *trafficEvictingQueue) moveTail() {
+	q.tail = (q.tail + 1) % len(q.ring)
+}

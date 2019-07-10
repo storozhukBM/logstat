@@ -21,7 +21,7 @@ func Equals(t testing.TB, exp interface{}, act interface{}, format string, args 
 	if reflect.DeepEqual(exp, act) {
 		return
 	}
-	t.Errorf("[ERROR] %v. exp: %+v; act: %+v", fmt.Sprintf(format, args...), exp, act)
+	t.Errorf("[ERROR] %v.\nexp: %+v\nact: %+v", fmt.Sprintf(format, args...), exp, act)
 	expBytes, expIsBytes := exp.([]byte)
 	actBytes, actIsBytes := act.([]byte)
 

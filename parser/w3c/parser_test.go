@@ -1,6 +1,7 @@
 package w3c
 
 import (
+	"fmt"
 	"github.com/storozhukBM/logstat/common/log"
 	"github.com/storozhukBM/logstat/common/test"
 	"github.com/storozhukBM/logstat/stat"
@@ -14,8 +15,10 @@ type parsingCase struct {
 
 func TestW3CParsing(t *testing.T) {
 	log.GlobalDebugEnabled = true
-	parser, parserErr := NewLineToStoreRecordParser(10)
-	test.FailOnError(t, parserErr)
+	parserWithCache, parserWithCacheErr := NewLineToStoreRecordParser(10)
+	test.FailOnError(t, parserWithCacheErr)
+	parserNoCache, parserNoCacheErr := NewLineToStoreRecordParser(0)
+	test.FailOnError(t, parserNoCacheErr)
 
 	cases := []parsingCase{
 		{
@@ -35,11 +38,16 @@ func TestW3CParsing(t *testing.T) {
 			result: stat.Record{UnixTime: 1525881642, Section: "/api", StatusCode: 503, ResponseSize: 12},
 		},
 	}
-	for _, testCase := range cases {
-		t.Run("", func(t *testing.T) {
-			actual, err := parser.Parse([]byte(testCase.line))
-			test.FailOnError(t, err)
-			test.Equals(t, testCase.result, actual, "mismatch on: %s", testCase.line)
-		})
+
+	parsers := []*LineToStoreRecordParser{parserWithCache, parserNoCache}
+
+	for _, parser := range parsers {
+		for _, testCase := range cases {
+			t.Run(fmt.Sprintf("cacheSize_%v_case_", parser.sectionInternCacheSize), func(t *testing.T) {
+				actual, err := parser.Parse([]byte(testCase.line))
+				test.FailOnError(t, err)
+				test.Equals(t, testCase.result, actual, "mismatch on: %s", testCase.line)
+			})
+		}
 	}
 }

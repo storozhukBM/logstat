@@ -11,6 +11,7 @@ import (
 )
 
 func TestFileReader(t *testing.T) {
+	t.Parallel()
 	const lineBufSize = 16 * 1024
 
 	tmpFile, tmpFileErr := ioutil.TempFile("", "test_file_reader")
