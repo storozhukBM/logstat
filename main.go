@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"github.com/storozhukBM/logstat/adapter/w3c"
 	"github.com/storozhukBM/logstat/common/log"
+	"github.com/storozhukBM/logstat/parser/w3c"
 	"github.com/storozhukBM/logstat/stat"
 	"github.com/storozhukBM/logstat/watcher"
 	"os"
@@ -32,13 +32,18 @@ func main() {
 		return
 	}
 
+	parser, parserErr := w3c.NewLineToStoreRecordParser(100)
+	if parserErr != nil {
+		log.Error("%v", parserErr)
+		return
+	}
+
 	storage, storageErr := stat.NewStatsStorage()
 	if storageErr != nil {
 		log.Error("%v", storageErr)
 		return
 	}
-
-	_, adapterErr := w3c.NewW3CLogToStoreAdapter(fileWatcher, storage, 100)
+	_, adapterErr := stat.NewLogToStoreAdapter(fileWatcher, storage, parser)
 	if adapterErr != nil {
 		log.Error("%v", adapterErr)
 		return

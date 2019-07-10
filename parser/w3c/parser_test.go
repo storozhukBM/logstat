@@ -14,7 +14,9 @@ type parsingCase struct {
 
 func TestW3CParsing(t *testing.T) {
 	log.GlobalDebugEnabled = true
-	adapter := &W3CLogToStoreAdapter{}
+	parser, parserErr := NewLineToStoreRecordParser(10)
+	test.FailOnError(t, parserErr)
+
 	cases := []parsingCase{
 		{
 			line:   `127.0.0.1 - james [09/May/2018:16:00:39 +0000] "GET /report HTTP/1.0" 200 123`,
@@ -35,7 +37,7 @@ func TestW3CParsing(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run("", func(t *testing.T) {
-			actual, err := adapter.parse([]byte(testCase.line))
+			actual, err := parser.Parse([]byte(testCase.line))
 			test.FailOnError(t, err)
 			test.Equals(t, testCase.result, actual, "mismatch on: %s", testCase.line)
 		})

@@ -13,19 +13,20 @@ import (
 const minBufSize = 4 * 1024
 
 /*
-Component used to read new lines from file
+A component used to read new lines from a file.
+Under load in hot path this file reader should work with almost zero allocations.
 
 Responsibilities:
- - open file and Close target file
- - track current reading offset
- - detect that file was rotated and start from the beginning of the new file
+	- open file and Close target file
+	- track current reading offset
+	- detect that file was rotated and start from the beginning of the new file
 
 Attention:
- - `ReadOneLineAsSlice` returns a view to internal reading buffer
-to avoid copying and pressure on GC. This view is only valid before the next
-`ReadOneLineAsSlice` call. If you need some parts of it to remain accessible,
-copy required parts.
-- call `Close` function to free managed resources
+	- `ReadOneLineAsSlice` returns a view to internal reading buffer
+	to avoid copying and pressure on GC. This view is only valid before the next
+	`ReadOneLineAsSlice` call. If you need some parts of it to remain accessible,
+	copy required parts
+	- call `Close` function to free managed resources
 */
 type FileReader struct {
 	fileName      string
