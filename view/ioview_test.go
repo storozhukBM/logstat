@@ -6,6 +6,7 @@ import (
 	"github.com/storozhukBM/logstat/alert"
 	"github.com/storozhukBM/logstat/common/test"
 	"github.com/storozhukBM/logstat/stat"
+	"sync"
 	"testing"
 	"time"
 )
@@ -57,7 +58,7 @@ const expectedReport = `
 
 func TestIOReport(t *testing.T) {
 	t.Parallel()
-	reportBuf := bytes.NewBuffer(nil)
+	reportBuf := &syncByteBuff{buf: bytes.NewBuffer(nil)}
 	v, vErr := NewIOView(context.Background(), 10*time.Second, reportBuf)
 	test.FailOnError(t, vErr)
 
@@ -81,7 +82,7 @@ const expResolved = "[RESOLVED] Time: 1970-01-01 00:02:10 +0000 UTC; Max Average
 
 func TestIOAlert(t *testing.T) {
 	t.Parallel()
-	buf := bytes.NewBuffer(nil)
+	buf := &syncByteBuff{buf: bytes.NewBuffer(nil)}
 	v, vErr := NewIOView(context.Background(), 10*time.Second, buf)
 	test.FailOnError(t, vErr)
 	{
@@ -110,4 +111,27 @@ func TestIOAlert(t *testing.T) {
 		time.Sleep(defaultTimeout)
 		test.Equals(t, []byte(expResolved), buf.Bytes(), "resolved mismatch")
 	}
+}
+
+type syncByteBuff struct {
+	mu  sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (b *syncByteBuff) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
+func (b *syncByteBuff) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Bytes()
+}
+
+func (b *syncByteBuff) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
 }

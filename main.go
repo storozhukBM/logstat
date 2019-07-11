@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/storozhukBM/logstat/alert"
 	"github.com/storozhukBM/logstat/common/log"
-	"github.com/storozhukBM/logstat/common/mem"
+	"github.com/storozhukBM/logstat/config"
 	"github.com/storozhukBM/logstat/parser/w3c"
 	"github.com/storozhukBM/logstat/stat"
 	"github.com/storozhukBM/logstat/view"
@@ -16,10 +16,12 @@ import (
 )
 
 func main() {
-	log.GlobalDebugEnabled = true
-	mem.PrintMemoryStatsAndEnablePProfInBackground()
+	cfg := config.ParseFlagsAsConfig()
+	if cfg.DebugMode {
+		log.GlobalDebugEnabled = true
+	}
 
-	fileReader, readerErr := watcher.NewFileReader("/tmp/access.log", 16*1024)
+	fileReader, readerErr := watcher.NewFileReader(cfg.FileName, cfg.FileReadBufSizeInBytes)
 	if readerErr != nil {
 		log.WithError(readerErr, "can't setup file reader")
 		return
@@ -29,26 +31,26 @@ func main() {
 	applicationCtx, applicationCancel := context.WithCancel(context.Background())
 	defer applicationCancel()
 
-	fileWatcher, watcherErr := watcher.NewLogFileWatcher(applicationCtx, fileReader, 100*time.Millisecond)
+	fileWatcher, watcherErr := watcher.NewLogFileWatcher(applicationCtx, fileReader, cfg.FileReadPollPeriod)
 	if watcherErr != nil {
-		log.Error("%v", watcherErr)
+		log.WithError(watcherErr, "can't setup file watcher")
 		return
 	}
 
-	parser, parserErr := w3c.NewLineToStoreRecordParser(100)
+	parser, parserErr := w3c.NewLineToStoreRecordParser(cfg.W3CParserSectionsStringCacheSize)
 	if parserErr != nil {
-		log.Error("%v", parserErr)
+		log.WithError(parserErr, "can't setup w3c log parser")
 		return
 	}
 
 	storage, storageErr := stat.NewStorage(10, 10)
 	if storageErr != nil {
-		log.Error("%v", storageErr)
+		log.WithError(storageErr, "can't setup traffic aggregation storage")
 		return
 	}
 	_, adapterErr := stat.NewLogToStoreAdapter(fileWatcher, storage, parser)
 	if adapterErr != nil {
-		log.Error("%v", adapterErr)
+		log.WithError(adapterErr, "can't setup log to storage adapter")
 		return
 	}
 
@@ -56,25 +58,25 @@ func main() {
 		120, 10, 10, 10,
 	)
 	if trafficAlertErr != nil {
-		log.Error("%v", trafficAlertErr)
+		log.WithError(trafficAlertErr, "can't setup traffic alert")
 		return
 	}
 
 	stdOutView, viewErr := view.NewIOView(applicationCtx, 10*time.Second, os.Stdout)
 	if viewErr != nil {
-		log.Error("%v", viewErr)
+		log.WithError(viewErr, "can't setup io view")
 		return
 	}
 
 	_, alertSubscriptionErr := alert.NewAlertsSubscription(trafficAlert, stdOutView.TrafficAlert)
 	if alertSubscriptionErr != nil {
-		log.Error("%v", alertSubscriptionErr)
+		log.WithError(alertSubscriptionErr, "can't setup alert broadcast")
 		return
 	}
 
 	_, statReportSubscriptionErr := stat.NewReportSubscription(storage, trafficAlert.Store, stdOutView.Report)
 	if statReportSubscriptionErr != nil {
-		log.Error("%v", statReportSubscriptionErr)
+		log.WithError(statReportSubscriptionErr, "can't setup traffic reports broadcast")
 		return
 	}
 

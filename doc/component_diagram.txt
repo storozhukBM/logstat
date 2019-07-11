@@ -1,0 +1,11 @@
+graph TD
+A[FileReader] -->|Reads lines from file into internal buffer. Detects file rotation.| B[LogFileWatcher]
+B -->|Detects file changes, deletions. Emits log lines to output channel. | C[LogToStoreAdapter]
+C -->|Parses line bytes. Maintains copies of required parts to enable line buffer reuse.| D[W3CLogParser]
+D -->|Parsed stats records.| C
+C -->|Parsed stats records.| F[ReportSubscription]
+F -->|Broadcasts Traffic Reports.| G[TrafficAlertStorage]
+G -->|Aggregates traffic reports to potentially bigger windows and examine them for certain violations.| H[AlertSubscription]
+H -->|Broadcasts Alerts.| I[IOView]
+F -->|Broadcasts Traffic Reports.| I[IOView]
+I -->|Prints reports and alerts in human readable format.| J(StdOut)
