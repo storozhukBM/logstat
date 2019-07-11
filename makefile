@@ -27,5 +27,5 @@ clean:
 	rm -f $(COVERAGENAME)
 
 run:
-	$(GOBUILD) -o $(BINARY_NAME) ./...
-	./$(BINARY_NAME)
+	$(GOBUILD) -o $(BINARYNAME)
+	./$(BINARYNAME)
