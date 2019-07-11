@@ -1,4 +1,4 @@
-package watcher
+package file
 
 import (
 	"encoding/base64"
@@ -16,7 +16,7 @@ func TestFileReader(t *testing.T) {
 
 	tmpFile, tmpFileErr := ioutil.TempFile("", "test_file_reader")
 	test.FailOnError(t, tmpFileErr)
-	reader, readerErr := NewFileReader(tmpFile.Name(), lineBufSize)
+	reader, readerErr := NewReader(tmpFile.Name(), lineBufSize)
 	test.FailOnError(t, readerErr)
 	defer log.OnError(reader.Close, "can't close file reader")
 

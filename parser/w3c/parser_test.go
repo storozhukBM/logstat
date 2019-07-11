@@ -34,8 +34,20 @@ func TestW3CParsing(t *testing.T) {
 			result: stat.Record{UnixTime: 1525881642, Section: "/api", StatusCode: 200, ResponseSize: 34},
 		},
 		{
-			line:   `127.0.0.1 - mary [09/May/2018:16:00:42 +0000] "POST /api/user HTTP/1.0" 503 12`,
-			result: stat.Record{UnixTime: 1525881642, Section: "/api", StatusCode: 503, ResponseSize: 12},
+			line:   `127.0.0.1 - frank [09/May/2018:23:59:59 +0000] "POST /api/user HTTP/1.0" 200 34`,
+			result: stat.Record{UnixTime: 1525910399, Section: "/api", StatusCode: 200, ResponseSize: 34},
+		},
+		{
+			line:   `127.0.0.1 - frank [10/May/2018:01:15:59 +0000] "POST /api/user HTTP/1.0" 200 34`,
+			result: stat.Record{UnixTime: 1525914959, Section: "/api", StatusCode: 200, ResponseSize: 34},
+		},
+		{
+			line:   `127.0.0.1 - frank [10/May/2018:01:15:59 -0700] "POST /api/user HTTP/1.0" 200 34`,
+			result: stat.Record{UnixTime: 1525940159, Section: "/api", StatusCode: 200, ResponseSize: 34},
+		},
+		{
+			line:   `127.0.0.1 - mary [09/May/2018:16:00:42 +0000] "POST /api/user HTTP/1.0" 503 19`,
+			result: stat.Record{UnixTime: 1525881642, Section: "/api", StatusCode: 503, ResponseSize: 19},
 		},
 	}
 

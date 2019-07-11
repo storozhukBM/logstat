@@ -1,6 +1,6 @@
 # logstat
 
-Simple console based tool that monitors access log file 
+A simple console-based that monitors access log file 
 and prints summary statistics on the traffic as a whole.
 
 Currently supported log formats:
@@ -36,7 +36,7 @@ Run tests
 Check coverage
 > make coverage
 
-Check for race conditions
+Check for race conditions (this can take a while)
 > make race
 
 ### Without Make
@@ -45,12 +45,17 @@ Check for race conditions
 ## Features and architecture
 The whole application is constructed from small, reusable components.
 All component are properly documented, so you can rely on documentation there.
-In general application composed in such fashion that is should tolerate 
-failures of other components or missed files or unexpected formatting of logs etc.
+In general, application composed in such fashion that should tolerate 
+failures of other components or missing files or unexpected formatting of logs etc.
 All potentially heavy loaded components like file reader, log parser, records aggregator
-implemented in "near zero allocation" fashion.
-From my test the only allocations present are in alert aggregator and view 
+implemented in "near-zero allocation" fashion.
+From my tests, the only allocations present are in alert aggregator and view 
 components that shouldn't be under pressure.
 
-High level structure of components:
-![Components Diagram](doc/mermaid-component-diagram.svg)
+## Performance
+On my machine, this tool is capable of processing ~200 [MB] of logs per second on one core, 
+which is ~2.5M [req/sec] (typical size of one line is ~80 bytes).
+pprof shows that I'm actually bounded by disk throughput, but of course some further optimizations possible.
+
+## High level structure of components:
+![Components Diagram](doc/mermaid-component-diagram-V01.svg)

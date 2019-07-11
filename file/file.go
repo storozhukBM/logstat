@@ -1,4 +1,4 @@
-package watcher
+package file
 
 import (
 	"bufio"
@@ -27,7 +27,7 @@ Attention:
 	copy required parts
 	- call `Close` function to free managed resources
 */
-type FileReader struct {
+type Reader struct {
 	fileName      string
 	readerBufSize uint
 
@@ -39,11 +39,11 @@ type FileReader struct {
 	overflowForLongLines *bytes.Buffer
 }
 
-func NewFileReader(fileName string, readerBufSize uint) (*FileReader, error) {
+func NewReader(fileName string, readerBufSize uint) (*Reader, error) {
 	if fileName == "" {
 		return nil, fmt.Errorf("fileName can't be empty")
 	}
-	result := &FileReader{
+	result := &Reader{
 		fileName:             fileName,
 		readerBufSize:        cmp.MaxUInt(readerBufSize, minBufSize),
 		overflowForLongLines: bytes.NewBuffer(nil),
@@ -53,14 +53,14 @@ func NewFileReader(fileName string, readerBufSize uint) (*FileReader, error) {
 	return result, nil
 }
 
-func (f *FileReader) Close() error {
+func (f *Reader) Close() error {
 	if f.currentFile != nil {
 		return f.currentFile.Close()
 	}
 	return nil
 }
 
-func (f *FileReader) ReadOneLineAsSlice() ([]byte, error) {
+func (f *Reader) ReadOneLineAsSlice() ([]byte, error) {
 	fileErr := f.prepareFileReadAndDetectRotation()
 	if fileErr != nil {
 		return nil, fileErr
@@ -91,7 +91,7 @@ func (f *FileReader) ReadOneLineAsSlice() ([]byte, error) {
 	}
 }
 
-func (f *FileReader) prepareFileReadAndDetectRotation() error {
+func (f *Reader) prepareFileReadAndDetectRotation() error {
 	fileInitializationErr := f.openAndInitializeFile()
 	if fileInitializationErr != nil {
 		return fileInitializationErr
@@ -118,7 +118,7 @@ func (f *FileReader) prepareFileReadAndDetectRotation() error {
 	return reopenFileErr
 }
 
-func (f *FileReader) openAndInitializeFile() error {
+func (f *Reader) openAndInitializeFile() error {
 	if f.currentFile != nil {
 		return nil
 	}
@@ -157,7 +157,7 @@ func (f *FileReader) openAndInitializeFile() error {
 	return nil
 }
 
-func (f *FileReader) checkTargetFileSize() (int64, error) {
+func (f *Reader) checkTargetFileSize() (int64, error) {
 	fileInfo, fileStatErr := f.currentFile.Stat()
 	if fileStatErr != nil {
 		return 0, fileStatErr

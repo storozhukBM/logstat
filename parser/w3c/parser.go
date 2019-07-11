@@ -6,7 +6,6 @@ import (
 	"github.com/storozhukBM/logstat/stat"
 	"hash"
 	"hash/fnv"
-	"strconv"
 	"time"
 	"unsafe"
 )
@@ -36,6 +35,9 @@ type LineToStoreRecordParser struct {
 	sectionInternCacheSize  int
 	stringInternHash        hash.Hash32
 	sectionPartsInternCache map[uint32]string
+
+	lastFullyParsedTimePart                  []byte
+	lastFullyParsedTimeStartOfTheDayUnixTime int64
 }
 
 func NewLineToStoreRecordParser(sectionInternCacheSize uint) (*LineToStoreRecordParser, error) {
@@ -178,26 +180,83 @@ func (p *LineToStoreRecordParser) skip(line []byte, separator byte, n int) int {
 }
 
 /*
-This parser potentially can be slow (due to generalized layout).
-In future can be replaced with specialized one.
-We parse using time.UTC zone to avoid allocations of *time.Location
+Time parser with cache to avoid parsing date and timezone.
 */
 func (p *LineToStoreRecordParser) parseTimePart(timePart []byte) (int64, error) {
+	if p.lastFullyParsedTimePart == nil {
+		return p.regularTimeParse(timePart)
+	}
+
+	{
+		cacheZonePart := p.lastFullyParsedTimePart[len(p.lastFullyParsedTimePart)-5:]
+		targetZonePart := timePart[len(timePart)-5:]
+		if !bytes.Equal(cacheZonePart, targetZonePart) {
+			return p.regularTimeParse(timePart)
+		}
+	}
+
+	{
+		cacheDatePart := p.lastFullyParsedTimePart[:len(p.lastFullyParsedTimePart)-15]
+		targetDatePart := timePart[:len(timePart)-15]
+		if !bytes.Equal(cacheDatePart, targetDatePart) {
+			return p.regularTimeParse(timePart)
+		}
+	}
+	targetHourPart := timePart[len(timePart)-14 : len(timePart)-12]
+	targetMinutePart := timePart[len(timePart)-11 : len(timePart)-9]
+	targetSecondPart := timePart[len(timePart)-8 : len(timePart)-6]
+
+	hour, hourErr := p.parseInt64(targetHourPart)
+	if hourErr != nil {
+		return 0, hourErr
+	}
+	minute, minuteErr := p.parseInt64(targetMinutePart)
+	if minuteErr != nil {
+		return 0, minuteErr
+	}
+	second, secondErr := p.parseInt64(targetSecondPart)
+	if secondErr != nil {
+		return 0, secondErr
+	}
+
+	secondOfDayUnixTime := (hour * 3600) + (minute * 60) + second
+	return p.lastFullyParsedTimeStartOfTheDayUnixTime + secondOfDayUnixTime, nil
+}
+
+/*
+This parser is really slow (due to generalized layout) [determined by profiling via pprof].
+So we use it only to parse date and timezone and cache results.
+We parse using time.UTC zone to avoid allocations of *time.Location
+*/
+func (p *LineToStoreRecordParser) regularTimeParse(timePart []byte) (int64, error) {
 	timePartStr := *(*string)(unsafe.Pointer(&timePart)) // bytes to string without potential allocation
 	t, parsingErr := time.ParseInLocation("02/Jan/2006:15:04:05 -0700", timePartStr, time.UTC)
 	if parsingErr != nil {
 		return 0, parsingErr
 	}
+	p.lastFullyParsedTimeStartOfTheDayUnixTime = time.Date(
+		t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC,
+	).Unix()
+	p.lastFullyParsedTimePart = make([]byte, len(timePart))
+	copy(p.lastFullyParsedTimePart, timePart)
 	return t.Unix(), nil
 }
 
+/*
+Simplified int parser that is faster than `strconv.ParseInt` etc.
+We don't need to parse signs like `-` or `+` and we don't need any scientific notation.
+And our base is always 10.
+*/
 func (p *LineToStoreRecordParser) parseInt64(intPart []byte) (int64, error) {
-	str := *(*string)(unsafe.Pointer(&intPart)) // bytes to string without potential allocation
-	result, parseErr := strconv.ParseInt(str, 10, 64)
-	if parseErr != nil {
-		return 0, fmt.Errorf("can't parse int from `%s`: %v", str, parseErr)
+	number := int64(0)
+	for _, d := range intPart {
+		if d < '0' || d > '9' {
+			return 0, fmt.Errorf("can't parse int: `%s`", string(intPart))
+		}
+		number *= 10
+		number += int64(d - '0')
 	}
-	return result, nil
+	return number, nil
 }
 
 func (p *LineToStoreRecordParser) internSectionString(sectionPart []byte) string {

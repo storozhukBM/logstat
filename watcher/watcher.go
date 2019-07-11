@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/storozhukBM/logstat/common/log"
 	"github.com/storozhukBM/logstat/common/pnc"
+	"github.com/storozhukBM/logstat/stat"
 	"io"
 	"math/rand"
 	"time"
@@ -14,20 +15,25 @@ type lineReader interface {
 	ReadOneLineAsSlice() ([]byte, error)
 }
 
+type storage interface {
+	Store(r stat.Record)
+}
+
+type parser interface {
+	Parse(line []byte) (stat.Record, error)
+}
+
 /*
-A component used to stream new lines from file to the output channel of bytes.
+A component used to stream new lines from file, parse and store them.
 It starts separate goroutine to track file changes.
 
 Responsibilities:
 	- watch for file and its new lines
 	- gracefully react if the file doesn't exist, is empty or has no new lines
-	- push new lines to the un-buffered output channel
+	- push new lines to the provided parser
+	- feed parsed log record to storage.
 
 Attention:
-	- output channel contains a view to internal reading buffer
-	to avoid copying and pressure on GC. This view is only valid before the next
-	line is fetched from the channel. If you need some parts of it to remain accessible,
-	copy the required parts.
 	- you should cancel associated context to free all attached resources.
 
 Future:
@@ -40,11 +46,11 @@ type LogFileWatcher struct {
 	pollPeriod    time.Duration
 	backOffRandom *rand.Rand
 	reader        lineReader
-
-	output chan []byte
+	storage       storage
+	parser        parser
 }
 
-func NewLogFileWatcher(ctx context.Context, reader lineReader, pollPeriod time.Duration) (*LogFileWatcher, error) {
+func NewLogFileWatcher(ctx context.Context, reader lineReader, store storage, parser parser, pollPeriod time.Duration) (*LogFileWatcher, error) {
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("ctx is already closed")
 	}
@@ -56,23 +62,14 @@ func NewLogFileWatcher(ctx context.Context, reader lineReader, pollPeriod time.D
 		pollPeriod:    pollPeriod,
 		backOffRandom: rand.New(rand.NewSource(time.Now().Unix())),
 		reader:        reader,
-
-		output: make(chan []byte),
+		storage:       store,
+		parser:        parser,
 	}
 	go result.run()
 	return result, nil
 }
 
-func (l *LogFileWatcher) Output() <-chan []byte {
-	return l.output
-}
-
 func (l *LogFileWatcher) run() {
-	defer func() {
-		log.Debug("closing watcher channel")
-		close(l.output)
-	}()
-
 	for l.ctx.Err() == nil {
 		cycleErr := l.cycle()
 		if cycleErr != nil {
@@ -86,7 +83,7 @@ func (l *LogFileWatcher) run() {
 
 func (l *LogFileWatcher) cycle() error {
 	defer pnc.PanicHandle()
-	for {
+	for l.ctx.Err() == nil {
 		slice, readErr := l.reader.ReadOneLineAsSlice()
 		if readErr == io.EOF {
 			return nil
@@ -94,12 +91,17 @@ func (l *LogFileWatcher) cycle() error {
 		if readErr != nil {
 			return readErr
 		}
-		select {
-		case l.output <- slice:
-		case <-l.ctx.Done():
-			return l.ctx.Err()
+
+		record, parseErr := l.parser.Parse(slice)
+		if parseErr != nil {
+			// we should immediately proceed with next line
+			log.Error("parser error happened: %v", parseErr)
+			continue
 		}
+
+		l.storage.Store(record)
 	}
+	return nil
 }
 
 func (l *LogFileWatcher) wait() {

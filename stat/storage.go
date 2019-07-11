@@ -16,8 +16,7 @@ Responsibilities:
 	- emmit traffic cycle reports into output channel
 
 Attention:
-	- `Store` method is not safe for concurrent use and intent to use in
-	combination with `stat.LogToStoreAdapter` component or synchronized externally
+	- `Store` method is not safe for concurrent use and intended to be synchronized externally
 	- if reports from output channel won't be consumed this component will print them as
 	error report
 */

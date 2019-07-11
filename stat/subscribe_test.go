@@ -40,7 +40,7 @@ func TestSubscribe(t *testing.T) {
 
 	reporter.reports <- testReport
 	reporter.reports <- testReport
-	time.Sleep(defaultTimeout)
+	time.Sleep(10 * defaultTimeout)
 	test.Equals(t, uint64(6), atomic.LoadUint64(&count), "subscriptions should work even after panic")
 }
 

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/storozhukBM/logstat/alert"
 	"github.com/storozhukBM/logstat/common/log"
 	"github.com/storozhukBM/logstat/config"
+	"github.com/storozhukBM/logstat/file"
 	"github.com/storozhukBM/logstat/parser/w3c"
 	"github.com/storozhukBM/logstat/stat"
 	"github.com/storozhukBM/logstat/view"
@@ -21,7 +23,7 @@ func main() {
 		log.GlobalDebugEnabled = true
 	}
 
-	fileReader, readerErr := watcher.NewFileReader(cfg.FileName, cfg.FileReadBufSizeInBytes)
+	fileReader, readerErr := file.NewReader(cfg.FileName, cfg.FileReadBufSizeInBytes)
 	if readerErr != nil {
 		log.WithError(readerErr, "can't setup file reader")
 		return
@@ -30,12 +32,6 @@ func main() {
 
 	applicationCtx, applicationCancel := context.WithCancel(context.Background())
 	defer applicationCancel()
-
-	fileWatcher, watcherErr := watcher.NewLogFileWatcher(applicationCtx, fileReader, cfg.FileReadPollPeriod)
-	if watcherErr != nil {
-		log.WithError(watcherErr, "can't setup file watcher")
-		return
-	}
 
 	parser, parserErr := w3c.NewLineToStoreRecordParser(cfg.W3CParserSectionsStringCacheSize)
 	if parserErr != nil {
@@ -48,9 +44,10 @@ func main() {
 		log.WithError(storageErr, "can't setup traffic aggregation storage")
 		return
 	}
-	_, adapterErr := stat.NewLogToStoreAdapter(fileWatcher, storage, parser)
-	if adapterErr != nil {
-		log.WithError(adapterErr, "can't setup log to storage adapter")
+
+	_, watcherErr := watcher.NewLogFileWatcher(applicationCtx, fileReader, storage, parser, cfg.FileReadPollPeriod)
+	if watcherErr != nil {
+		log.WithError(watcherErr, "can't setup file watcher")
 		return
 	}
 
@@ -84,4 +81,5 @@ func main() {
 	defer close(stopCh)
 	signal.Notify(stopCh, syscall.SIGTERM, syscall.SIGINT)
 	<-stopCh
+	fmt.Println()
 }

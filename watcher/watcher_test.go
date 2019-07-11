@@ -4,100 +4,118 @@ import (
 	"context"
 	"fmt"
 	"github.com/storozhukBM/logstat/common/test"
+	"github.com/storozhukBM/logstat/stat"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-const defaultTimeout = 15 * time.Millisecond
-
 func TestLogFileWatcher(t *testing.T) {
 	t.Parallel()
 	reader := newFileReaderMock()
-	ctx, ctxCancel := context.WithCancel(context.Background())
+	store := newStorageMock()
+	parser := &parserMock{}
+	ctx := context.Background()
 
-	watcher, watcherErr := NewLogFileWatcher(ctx, reader, time.Millisecond)
+	_, watcherErr := NewLogFileWatcher(ctx, reader, store, parser, 5*time.Millisecond)
 	test.FailOnError(t, watcherErr)
-	test.Equals(t, 0, len(watcher.Output()), "watcher should be empty")
-	waitTillTimeout(t, watcher)
+	waitForRecordTimeout(t, store)
 
-	reader.lines <- []byte("first")
+	reader.lines <- []byte("first1")
+	waitForRecord(t, store, "first1")
 	reader.lines <- []byte("second")
-	waitForLine(t, watcher, []byte("first"))
-	waitForLine(t, watcher, []byte("second"))
+	waitForRecord(t, store, "second")
+
+	waitForRecordTimeout(t, store)
+
+	reader.lines <- []byte("first2")
+	reader.lines <- []byte("second")
+	waitForRecord(t, store, "first2")
+	waitForRecord(t, store, "second")
+
+	waitForRecordTimeout(t, store)
 
 	reader.setError(io.ErrUnexpectedEOF)
-	waitTillTimeout(t, watcher)
+	waitForRecordTimeout(t, store)
 
 	reader.setError(nil)
-	waitTillTimeout(t, watcher)
+	waitForRecordTimeout(t, store)
 
-	ctxCancel()
-	time.Sleep(defaultTimeout)
-	_, watcherOpen := <-watcher.Output()
-	test.Equals(t, false, watcherOpen, "watcher should be closed with ctx")
+	reader.lines <- []byte("first3")
+	waitForRecord(t, store, "first3")
+
+	reader.lines <- []byte("first4")
+	waitForRecord(t, store, "first4")
+
+	reader.lines <- []byte("err: parser failure")
+	waitForRecordTimeout(t, store)
+
+	reader.lines <- []byte("first5")
+	waitForRecord(t, store, "first5")
+
+	reader.lines <- []byte("pnc: expected panic for tests")
+	waitForRecordTimeout(t, store)
+
+	reader.lines <- []byte("first6")
+	waitForRecord(t, store, "first6")
 }
 
-func TestLogFileWatcherCloseChannelOnWriteBlock(t *testing.T) {
-	reader := newFileReaderMock()
-	ctx, ctxCancel := context.WithCancel(context.Background())
+type parserMock struct{}
 
-	watcher, watcherErr := NewLogFileWatcher(ctx, reader, time.Millisecond)
-	test.FailOnError(t, watcherErr)
-	test.Equals(t, 0, len(watcher.Output()), "watcher should be empty")
-	waitTillTimeout(t, watcher)
-
-	reader.lines <- []byte("first")
-	ctxCancel()
-	time.Sleep(defaultTimeout)
-	_, watcherOpen := <-watcher.Output()
-	test.Equals(t, false, watcherOpen, "watcher should be closed with ctx")
+func (p *parserMock) Parse(line []byte) (stat.Record, error) {
+	lineStr := string(line)
+	if strings.HasPrefix(lineStr, "err:") {
+		return stat.Record{}, fmt.Errorf("can't parse line: %v", lineStr)
+	}
+	if strings.HasPrefix(lineStr, "pnc:") {
+		panic(fmt.Errorf("can't parse line: %v", lineStr))
+	}
+	return stat.Record{Section: lineStr}, nil
 }
 
-func TestLogFileWatcherHandlePanic(t *testing.T) {
-	reader := newFileReaderMock()
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	defer ctxCancel()
-
-	watcher, watcherErr := NewLogFileWatcher(ctx, reader, time.Millisecond)
-	test.FailOnError(t, watcherErr)
-	test.Equals(t, 0, len(watcher.Output()), "watcher should be empty")
-	waitTillTimeout(t, watcher)
-
-	reader.setPanic(true)
-	waitTillTimeout(t, watcher)
-	reader.setPanic(false)
-
-	reader.lines <- []byte("first")
-	waitForLine(t, watcher, []byte("first"))
+type storageMock struct {
+	records chan stat.Record
 }
 
-func waitForLine(t *testing.T, watcher *LogFileWatcher, line []byte) {
+func newStorageMock() *storageMock {
+	result := &storageMock{
+		records: make(chan stat.Record, 100),
+	}
+	return result
+}
+
+func (p *storageMock) Store(r stat.Record) {
+	p.records <- r
+}
+
+func waitForRecord(t *testing.T, storage *storageMock, expSection string) {
 	{
 		var timeout time.Time
-		var bytes []byte
+		var record stat.Record
 		var open bool
 		select {
-		case bytes, open = <-watcher.Output():
-		case timeout = <-time.After(defaultTimeout):
+		case record, open = <-storage.records:
+		case timeout = <-time.After(time.Second):
 		}
 		test.Equals(t, time.Time{}, timeout, "no timeout should happen")
-		test.Equals(t, line, bytes, "read line")
-		test.Equals(t, true, open, "watcher shouldn't be closed")
+		test.Equals(t, expSection, record.Section, "read record mismatch")
+		test.Equals(t, true, open, "ring shouldn't be closed")
 	}
 }
 
-func waitTillTimeout(t *testing.T, watcher *LogFileWatcher) {
+func waitForRecordTimeout(t *testing.T, storage *storageMock) {
 	emptyTime := time.Time{}
 
 	var timeout time.Time
-	var bytes []byte
+	var record stat.Record
+
 	select {
-	case bytes, _ = <-watcher.Output():
-	case timeout = <-time.After(defaultTimeout):
+	case record, _ = <-storage.records:
+	case timeout = <-time.After(10 * time.Millisecond):
 	}
-	test.Equals(t, []byte(nil), bytes, "read line")
+	test.Equals(t, stat.Record{}, record, "read report")
 	if timeout == emptyTime {
 		test.FailOnError(t, fmt.Errorf("timeout didn't happen"))
 	}

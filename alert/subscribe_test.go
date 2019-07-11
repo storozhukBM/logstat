@@ -39,7 +39,7 @@ func TestSubscribe(t *testing.T) {
 
 	alerter.alerts <- testAlert
 	alerter.alerts <- testAlert
-	time.Sleep(defaultTimeout)
+	time.Sleep(10 * defaultTimeout)
 	test.Equals(t, uint64(6), atomic.LoadUint64(&count), "subscriptions should work even after panic")
 }
 
