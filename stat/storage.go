@@ -2,8 +2,25 @@ package stat
 
 import (
 	"fmt"
+	"github.com/storozhukBM/logstat/common/log"
 )
 
+/*
+A component used to store log records and aggregate them into
+reports by the specified time windows called cycles.
+
+Responsibilities:
+	- accept log records
+	- modify internal cycle aggregate
+	- rotate cycles by time specified in log records
+	- emmit traffic cycle reports into output channel
+
+Attention:
+	- `Store` method is not safe for concurrent use and intent to use in
+	combination with `stat.LogToStoreAdapter` component or synchronized externally
+	- if reports from output channel won't be consumed this component will print them as
+	error report
+*/
 type Storage struct {
 	cycleDurationInSeconds int64
 
@@ -69,7 +86,8 @@ func (s *Storage) tryRotateCurrentCycle(recordOffset int64) *Report {
 	select {
 	case s.prevCyclesRing <- *oldCycle:
 	default:
-		<-s.prevCyclesRing
+		notConsumedReport := <-s.prevCyclesRing
+		log.Error("[ALERT] CycleReport wasn't consumed from prevCyclesRing: %+v", notConsumedReport)
 		s.prevCyclesRing <- *oldCycle
 	}
 

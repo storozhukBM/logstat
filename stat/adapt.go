@@ -18,6 +18,10 @@ type parser interface {
 	Parse(line []byte) (Record, error)
 }
 
+/*
+A component used to consume log lines from the specified channel,
+parse them with provided parsed and feed to log record storage.
+*/
 type LogToStoreAdapter struct {
 	lineProvider logSource
 	store        store

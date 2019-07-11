@@ -9,6 +9,9 @@ type reportProvider interface {
 	Reports() <-chan Report
 }
 
+/*
+A component used broadcast reports to multiple consumers.
+*/
 type ReportSubscription struct {
 	reportProvider reportProvider
 	listeners      []func(r Report)

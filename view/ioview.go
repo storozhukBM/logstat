@@ -13,8 +13,25 @@ import (
 	"time"
 )
 
-const sep = "_______________________________"
+const sep = "_________________________________"
 
+/*
+A component used to visualize reports and print alerts to the specified writer.
+
+Responsibilities:
+	- print stats reports
+	- print alerts
+	- print heartbeats in case of no other events
+
+Attention:
+	- this component allocated a lot, but it shouldn't be a problem
+	due to the expected low rate of events
+
+Future:
+	- current reports are human-readable, but can be harder to parse by machine,
+	print templates can be abstracted and replaceable to allow different print formats.
+
+*/
 type IOView struct {
 	ctx           context.Context
 	refreshPeriod time.Duration
@@ -76,18 +93,33 @@ func (v *IOView) printReport(r stat.Report) {
 }
 
 func (v *IOView) printReportSummary(r stat.Report) {
+	reqPerSecond := float64(r.TotalRequests) / float64(r.CycleDurationInSeconds)
+	KBPerSecond := float64(r.TotalResponseSizeInBytes) / float64(r.CycleDurationInSeconds) / 1024.
+	KBPerRequest := float64(r.TotalResponseSizeInBytes) / float64(r.TotalRequests) / 1024.
+	totalKBs := float64(r.TotalResponseSizeInBytes) / 1024.
+
 	_, _ = fmt.Fprintf(v.output, "\n|\n| Report Summary\n")
 	w := v.newTable()
-	v.printRowToTable(w, "|%s\t%s\t%s\n", sep, sep, sep)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 
-	v.printRowToTable(w, "| Server Time\t Total requests\t Total response size\n")
-	v.printRowToTable(w, "|%s\t%s\t%s\n", sep, sep, sep)
+	v.printRowToTable(w, "| Server Time\t %v\n", time.Unix(r.CycleStartUnixTime, 0).UTC())
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 
-	v.printRowToTable(
-		w, "| %+v\t %+v\t %+v\n",
-		time.Unix(r.CycleStartUnixTime, 0).UTC(), r.TotalRequests, r.TotalResponseSizeInBytes,
-	)
-	v.printRowToTable(w, "|%s\t%s\t%s\n", sep, sep, sep)
+	v.printRowToTable(w, "| Total Requests\t %29d\n", r.TotalRequests)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
+
+	v.printRowToTable(w, "| Total Responses Size [KBs]\t %29.4f\n", totalKBs)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
+
+	v.printRowToTable(w, "| Average Requests Rate [req/sec]\t %29.4f\n", reqPerSecond)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
+
+	v.printRowToTable(w, "| Response Throughput [KBs/sec]\t %29.4f\n", KBPerSecond)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
+
+	v.printRowToTable(w, "| Average Response Size [KBs/req]\t %29.4f\n", KBPerRequest)
+	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
+
 	v.finishTable(w)
 }
 
@@ -115,7 +147,7 @@ func (v *IOView) printSectionTop(r stat.Report) {
 	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 
 	for _, sectionHit := range sectionHits {
-		v.printRowToTable(w, "| %v\t %v\n", sectionHit.section, sectionHit.hits)
+		v.printRowToTable(w, "| %v\t %29d\n", sectionHit.section, sectionHit.hits)
 		v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 	}
 	v.finishTable(w)
@@ -146,24 +178,38 @@ func (v *IOView) printStatusCodeTop(r stat.Report) {
 	v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 
 	for _, codeHit := range codeHits {
-		v.printRowToTable(w, "| %v\t %v\n", codeHit.code, codeHit.hits)
+		v.printRowToTable(w, "| %v\t %29d\n", codeHit.code, codeHit.hits)
 		v.printRowToTable(w, "|%s\t%s\n", sep, sep)
 	}
 	v.finishTable(w)
 }
 
 func (v *IOView) printTrafficAlert(a alert.TrafficAlert) {
-	if !a.Resolved {
+	windowDurationInSeconds := a.WindowEndUnixTime - a.WindowStartUnixTime
+	observedReqPerSecond := float64(a.ObservedInWindowRequests) / float64(windowDurationInSeconds)
+	maxAllowedReqPerSecond := float64(a.MaxAllowedRequests) / float64(windowDurationInSeconds)
+	if a.Resolved {
+		_, _ = fmt.Fprintf(v.output, "[RESOLVED] ")
+		v.lastTrafficAlert = nil
+	} else {
+		_, _ = fmt.Fprintf(v.output, "[ALERT] ")
 		v.lastTrafficAlert = &a
-		_, _ = fmt.Fprintf(v.output, "[ALERT]: %+v\n", a)
-		return
 	}
-	_, _ = fmt.Fprintf(v.output, "[RESOLVED]: %+v\n", a)
-	v.lastTrafficAlert = nil
+	_, _ = fmt.Fprintf(
+		v.output, "Time: %+v; Max Average Requests Rate [req/sec]: %.4f; Observed Average Requests Rate: %.4f\n",
+		time.Unix(a.WindowEndUnixTime, 0).UTC(), maxAllowedReqPerSecond, observedReqPerSecond,
+	)
 }
 
 func (v *IOView) printNoTrafficReport() {
 	_, _ = fmt.Fprint(v.output, "| Report Summary: no traffic\n")
+	if v.lastTrafficAlert != nil {
+		windowSeconds := v.lastTrafficAlert.WindowEndUnixTime - v.lastTrafficAlert.WindowStartUnixTime
+		secondsToNow := time.Now().Unix() - v.lastTrafficAlert.WindowEndUnixTime
+		if secondsToNow > windowSeconds {
+			_, _ = fmt.Fprint(v.output, "[WARN] alert may be resolved but there is no traffic to confirm\n")
+		}
+	}
 }
 
 func (v *IOView) newTable() *tabwriter.Writer {

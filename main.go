@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/storozhukBM/logstat/alert"
 	"github.com/storozhukBM/logstat/common/log"
+	"github.com/storozhukBM/logstat/common/mem"
 	"github.com/storozhukBM/logstat/parser/w3c"
 	"github.com/storozhukBM/logstat/stat"
 	"github.com/storozhukBM/logstat/view"
@@ -16,7 +17,7 @@ import (
 
 func main() {
 	log.GlobalDebugEnabled = true
-	log.PrintMemoryStatsInBackground()
+	mem.PrintMemoryStatsAndEnablePProfInBackground()
 
 	fileReader, readerErr := watcher.NewFileReader("/tmp/access.log", 16*1024)
 	if readerErr != nil {

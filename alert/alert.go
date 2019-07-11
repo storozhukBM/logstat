@@ -6,6 +6,20 @@ import (
 	"github.com/storozhukBM/logstat/stat"
 )
 
+/*
+A component used to accept traffic stats reports and examine them for certain violations.
+
+Responsibilities:
+	- accept traffic stats reports
+	- maintain an internal ring of reports that fit into specified alerting period
+	- emmit events about new or resolved alerts into the output channel
+
+Attention:
+	- `Store` method is not safe for concurrent use and intent to use in
+	combination with `stat.ReportSubscription` component or synchronized externally
+	- if alerts from output channel won't be consumed this component will print them as
+	error report
+*/
 type TrafficState struct {
 	windowDurationInSeconds int64
 	reportsCycleInSeconds   int64
@@ -20,7 +34,10 @@ type TrafficState struct {
 	alertsRing  chan TrafficAlert
 }
 
-func NewTrafficState(windowDurationInSeconds uint64, reportsCycleInSeconds uint64, maxTrafficInWindow uint64, alertRingSize uint) (*TrafficState, error) {
+func NewTrafficState(
+	windowDurationInSeconds uint64, reportsCycleInSeconds uint64,
+	maxAvgTrafficInReqPerSecond uint64, alertRingSize uint,
+) (*TrafficState, error) {
 	slotsSize := windowDurationInSeconds / reportsCycleInSeconds
 	if slotsSize < 1 {
 		return nil, fmt.Errorf("mismatched configuration of windowDurationInSeconds and reportsCycleInSeconds")
@@ -34,7 +51,7 @@ func NewTrafficState(windowDurationInSeconds uint64, reportsCycleInSeconds uint6
 	result := &TrafficState{
 		windowDurationInSeconds: int64(windowDurationInSeconds),
 		reportsCycleInSeconds:   int64(reportsCycleInSeconds),
-		maxTrafficInWindow:      maxTrafficInWindow,
+		maxTrafficInWindow:      maxAvgTrafficInReqPerSecond * windowDurationInSeconds,
 
 		requestsInWindow:             0,
 		lastReportCycleStartUnixTime: 0,
@@ -121,6 +138,7 @@ type trafficEvictingQueue struct {
 	ring []trafficSlot
 	head int
 	tail int
+	size int
 }
 
 func newTrafficRing(size int) *trafficEvictingQueue {
@@ -128,7 +146,7 @@ func newTrafficRing(size int) *trafficEvictingQueue {
 }
 
 func (q *trafficEvictingQueue) getHead() (trafficSlot, bool) {
-	if q.tail == q.head {
+	if q.size == 0 {
 		return trafficSlot{}, false
 	}
 	head := q.ring[q.head]
@@ -136,17 +154,24 @@ func (q *trafficEvictingQueue) getHead() (trafficSlot, bool) {
 }
 
 func (q *trafficEvictingQueue) removeHead() (trafficSlot, bool) {
-	if q.tail == q.head {
+	if q.size == 0 {
 		return trafficSlot{}, false
 	}
 	head := q.ring[q.head]
 	q.moveHead()
+	q.size--
 	return head, true
 }
 
 func (q *trafficEvictingQueue) pushToTail(slot trafficSlot) {
+	if q.size == len(q.ring) {
+		// required only for situations when server time in report is invalid or going backwards
+		// this change helps alert manager to handle such situations gracefully
+		q.removeHead()
+	}
 	q.ring[q.tail] = slot
 	q.moveTail()
+	q.size++
 }
 
 func (q *trafficEvictingQueue) moveHead() {

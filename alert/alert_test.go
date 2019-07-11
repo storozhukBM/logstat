@@ -13,7 +13,7 @@ const defaultTimeout = 10 * time.Millisecond
 func TestAlert(t *testing.T) {
 	t.Parallel()
 	state, stateErr := NewTrafficState(
-		10, 2, 10, 2,
+		10, 2, 1, 2,
 	)
 	test.FailOnError(t, stateErr)
 	state.Store(stat.Report{CycleDurationInSeconds: 2, CycleOffset: 3, CycleStartUnixTime: 6, TotalRequests: 4})

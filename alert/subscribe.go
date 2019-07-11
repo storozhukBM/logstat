@@ -9,6 +9,9 @@ type alertsProvider interface {
 	Alerts() <-chan TrafficAlert
 }
 
+/*
+A component used broadcast alerts to multiple consumers.
+*/
 type AlertsSubscription struct {
 	reportProvider alertsProvider
 	listeners      []func(a TrafficAlert)

@@ -15,25 +15,25 @@ type lineReader interface {
 }
 
 /*
-Component used to stream new lines from file to output channel of bytes.
+A component used to stream new lines from file to the output channel of bytes.
 It starts separate goroutine to track file changes.
 
 Responsibilities:
- - watch for file and its new lines
- - gracefully react if file don't exists, is empty or has no new lines
- - push new lines to un-buffered output channel
+	- watch for file and its new lines
+	- gracefully react if the file doesn't exist, is empty or has no new lines
+	- push new lines to the un-buffered output channel
 
 Attention:
- - output channel contains a view to internal reading buffer
-to avoid copying and pressure on GC. This view is only valid before the next
-line is fetched from channel. If you need some parts of it to remain accessible,
-copy required parts.
-- you should cancel associated context to free all attached resources.
+	- output channel contains a view to internal reading buffer
+	to avoid copying and pressure on GC. This view is only valid before the next
+	line is fetched from the channel. If you need some parts of it to remain accessible,
+	copy the required parts.
+	- you should cancel associated context to free all attached resources.
 
 Future:
-This solution is too straightforward and can have bad latency and energy efficiency
-capabilities. In future it can be replace by some specialized library with usage of
-fsnotify.
+	- this solution is too straightforward and can have bad latency and energy efficiency
+	capabilities. In the future, it can be replaced by some specialized library with the
+	usage of fsnotify.
 */
 type LogFileWatcher struct {
 	ctx           context.Context
