@@ -1,6 +1,6 @@
 # logstat
 
-A simple console-based that monitors access log file 
+A simple console-based tool that monitors access log file 
 and prints summary statistics on the traffic as a whole.
 
 IMPORTANT: This tool reporting and alerting logic is entirely based on timestamps from log records, 
