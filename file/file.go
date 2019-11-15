@@ -8,6 +8,7 @@ import (
 	"github.com/storozhukBM/logstat/common/log"
 	"io"
 	"os"
+	"time"
 )
 
 const minBufSize = 4 * 1024
@@ -31,6 +32,11 @@ type Reader struct {
 	fileName      string
 	readerBufSize uint
 
+	input            chan []byte
+	output           chan []byte
+	currentBuf       []byte
+	currentBufOffset int
+
 	initialized          bool
 	endReached           bool
 	currentOffset        int64
@@ -48,8 +54,15 @@ func NewReader(fileName string, readerBufSize uint) (*Reader, error) {
 		readerBufSize:        cmp.MaxUInt(readerBufSize, minBufSize),
 		overflowForLongLines: bytes.NewBuffer(nil),
 
+		input:  make(chan []byte, 5),
+		output: make(chan []byte, 5),
+
 		endReached: true,
 	}
+	for i := 0; i < 5; i++ {
+		result.input <- make([]byte, result.readerBufSize)
+	}
+	go result.fetchAsync()
 	return result, nil
 }
 
@@ -61,34 +74,44 @@ func (f *Reader) Close() error {
 }
 
 func (f *Reader) ReadOneLineAsSlice() ([]byte, error) {
-	fileErr := f.prepareFileReadAndDetectRotation()
-	if fileErr != nil {
-		return nil, fileErr
-	}
 	f.overflowForLongLines.Reset()
 	returnOverflow := false
 	for {
-		line, isPrefix, readErr := f.currentReader.ReadLine()
-		if readErr != nil {
-			f.endReached = readErr == io.EOF
-			return nil, readErr
+		if f.currentBuf == nil {
+			buf := <-f.output
+			f.currentBuf = buf
 		}
-		f.endReached = false
 
-		f.currentOffset += int64(len(line))
-
-		if isPrefix {
-			log.Debug("using overflow buf: %v; bufSize: %v", f.fileName, f.overflowForLongLines.Cap())
+		line, readErr := f.readSlice('\n')
+		if readErr != nil {
 			f.overflowForLongLines.Write(line)
 			returnOverflow = true
+			f.currentBufOffset = 0
+			f.currentBuf = f.currentBuf[0:cap(f.currentBuf)]
+			f.input <- f.currentBuf
+			f.currentBuf = nil
 			continue
 		}
+		line = line[:len(line)-1]
+		f.currentOffset += int64(len(line))
 		if returnOverflow {
 			f.overflowForLongLines.Write(line)
 			return f.overflowForLongLines.Bytes(), nil
 		}
 		return line, nil
 	}
+}
+
+func (f *Reader) readSlice(delim byte) (line []byte, err error) {
+	i := bytes.IndexByte(f.currentBuf[f.currentBufOffset:], delim)
+	end := f.currentBufOffset + i + 1
+	if i < 0 {
+		end = len(f.currentBuf)
+		err = io.EOF
+	}
+	line = f.currentBuf[f.currentBufOffset:end]
+	f.currentBufOffset = end
+	return line, err
 }
 
 func (f *Reader) prepareFileReadAndDetectRotation() error {
@@ -163,4 +186,24 @@ func (f *Reader) checkTargetFileSize() (int64, error) {
 		return 0, fileStatErr
 	}
 	return fileInfo.Size(), nil
+}
+
+func (f *Reader) fetchAsync() {
+	for {
+		fileErr := f.prepareFileReadAndDetectRotation()
+		if fileErr != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		buf := <-f.input
+		buf = buf[:cap(buf)]
+		n, readErr := f.currentReader.Read(buf)
+		if readErr != nil {
+			f.input <- buf
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		buf = buf[:n]
+		f.output <- buf
+	}
 }

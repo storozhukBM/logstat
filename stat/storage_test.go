@@ -92,7 +92,7 @@ func waitForCycleTillTimeout(t *testing.T, storage *Storage) {
 	var report Report
 
 	select {
-	case report, _ = <-storage.Reports():
+	case report = <-storage.Reports():
 	case timeout = <-time.After(defaultTimeout):
 	}
 	test.Equals(t, Report{}, report, "read report")

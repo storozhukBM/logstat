@@ -95,7 +95,7 @@ func waitForAlertTillTimeout(t *testing.T, storage *TrafficState) {
 	var alert TrafficAlert
 
 	select {
-	case alert, _ = <-storage.Alerts():
+	case alert = <-storage.Alerts():
 	case timeout = <-time.After(defaultTimeout):
 	}
 	test.Equals(t, TrafficAlert{}, alert, "read alert")

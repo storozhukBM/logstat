@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/storozhukBM/logstat/stat"
-	"hash"
-	"hash/fnv"
 	"time"
 	"unsafe"
 )
@@ -33,8 +31,7 @@ Future:
 */
 type LineToStoreRecordParser struct {
 	sectionInternCacheSize  int
-	stringInternHash        hash.Hash32
-	sectionPartsInternCache map[uint32]string
+	sectionPartsInternCache map[string]string
 
 	lastFullyParsedTimePart                  []byte
 	lastFullyParsedTimeStartOfTheDayUnixTime int64
@@ -43,8 +40,7 @@ type LineToStoreRecordParser struct {
 func NewLineToStoreRecordParser(sectionInternCacheSize uint) (*LineToStoreRecordParser, error) {
 	result := &LineToStoreRecordParser{
 		sectionInternCacheSize:  int(sectionInternCacheSize),
-		stringInternHash:        fnv.New32a(),
-		sectionPartsInternCache: make(map[uint32]string),
+		sectionPartsInternCache: make(map[string]string),
 	}
 	return result, nil
 }
@@ -80,7 +76,7 @@ func (p *LineToStoreRecordParser) Parse(line []byte) (stat.Record, error) {
 }
 
 func (p *LineToStoreRecordParser) skipPrefix(line []byte) (int, error) {
-	timePartStart := p.skip(line, ' ', 3)
+	timePartStart := bytes.Index(line, []byte{' ', '['})
 	if timePartStart == -1 {
 		return 0, fmt.Errorf("enexpected format of line. not enough spaces in prefix")
 	}
@@ -88,10 +84,7 @@ func (p *LineToStoreRecordParser) skipPrefix(line []byte) (int, error) {
 }
 
 func (p *LineToStoreRecordParser) findAndParseTimePart(line []byte, timePartStart int) (int, int64, error) {
-	timePartStart += 1 // skip `[` from time part
-	if timePartStart >= len(line) {
-		return 0, 0, fmt.Errorf("enexpected format of line. missed `[` in time part")
-	}
+	timePartStart += 2 // skip `[` from time part
 	timePartEnd := bytes.IndexByte(line[timePartStart:], ']')
 	if timePartEnd == -1 {
 		return 0, 0, fmt.Errorf("enexpected format of line. can't parse time part end")
@@ -130,9 +123,6 @@ func (p *LineToStoreRecordParser) findAndParseSectionPart(line []byte, timePartE
 
 func (p *LineToStoreRecordParser) findAndParseStatusCodePart(line []byte, sectionPartEnd int) (int, int32, error) {
 	sectionPartEnd = sectionPartEnd + 1 // skip ` ` from time protocol part
-	if sectionPartEnd >= len(line) {
-		return 0, 0, fmt.Errorf("enexpected format of line. missed ` ` in protocol part")
-	}
 	statusCodePartStart := bytes.IndexByte(line[sectionPartEnd:], ' ')
 	if statusCodePartStart == -1 {
 		return 0, 0, fmt.Errorf("enexpected format of line. can't parse status code start")
@@ -141,42 +131,19 @@ func (p *LineToStoreRecordParser) findAndParseStatusCodePart(line []byte, sectio
 
 	statusCodePartStart = statusCodePartStart + 1 // skip ` ` from time protocol part
 	statusCodePartEnd := statusCodePartStart + 3  // status code should take 3 chars
-	if statusCodePartEnd >= len(line) {
-		return 0, 0, fmt.Errorf("enexpected format of line. staus code part is cropped")
-	}
 	statusCodePart := line[statusCodePartStart:statusCodePartEnd]
-	statusCode, statusCodeParsingErr := p.parseInt64(statusCodePart)
-	if statusCodeParsingErr != nil {
-		return 0, 0, statusCodeParsingErr
-	}
+	statusCode := p.parseStatusCode(statusCodePart)
 	return statusCodePartEnd, int32(statusCode), nil
 }
 
 func (p *LineToStoreRecordParser) findAndParseBodySize(line []byte, statusCodePartEnd int) (int64, error) {
 	bodySizePartStart := statusCodePartEnd + 1 // skip ` ` from time body size part
-	if bodySizePartStart >= len(line) {
-		return 0, fmt.Errorf("enexpected format of line. missed ` ` in body size part")
-	}
 	bodySizePart := line[bodySizePartStart:]
 	bodySize, bodySizeParsingErr := p.parseInt64(bodySizePart)
 	if bodySizeParsingErr != nil {
 		return 0, bodySizeParsingErr
 	}
 	return bodySize, nil
-}
-
-func (p *LineToStoreRecordParser) skip(line []byte, separator byte, n int) int {
-	count := n
-	target := line
-	for count > 0 {
-		idx := bytes.IndexByte(target, separator)
-		if idx == -1 || idx+1 == len(target) {
-			return -1
-		}
-		target = target[idx+1:]
-		count--
-	}
-	return len(line) - len(target)
 }
 
 /*
@@ -186,7 +153,13 @@ func (p *LineToStoreRecordParser) parseTimePart(timePart []byte) (int64, error) 
 	if p.lastFullyParsedTimePart == nil {
 		return p.regularTimeParse(timePart)
 	}
-
+	{
+		cacheDatePart := p.lastFullyParsedTimePart[:len(p.lastFullyParsedTimePart)-9]
+		targetDatePart := timePart[:len(timePart)-9]
+		if !bytes.Equal(cacheDatePart, targetDatePart) {
+			return p.regularTimeParse(timePart)
+		}
+	}
 	{
 		cacheZonePart := p.lastFullyParsedTimePart[len(p.lastFullyParsedTimePart)-5:]
 		targetZonePart := timePart[len(timePart)-5:]
@@ -194,33 +167,9 @@ func (p *LineToStoreRecordParser) parseTimePart(timePart []byte) (int64, error) 
 			return p.regularTimeParse(timePart)
 		}
 	}
-
-	{
-		cacheDatePart := p.lastFullyParsedTimePart[:len(p.lastFullyParsedTimePart)-15]
-		targetDatePart := timePart[:len(timePart)-15]
-		if !bytes.Equal(cacheDatePart, targetDatePart) {
-			return p.regularTimeParse(timePart)
-		}
-	}
-	targetHourPart := timePart[len(timePart)-14 : len(timePart)-12]
-	targetMinutePart := timePart[len(timePart)-11 : len(timePart)-9]
 	targetSecondPart := timePart[len(timePart)-8 : len(timePart)-6]
-
-	hour, hourErr := p.parseInt64(targetHourPart)
-	if hourErr != nil {
-		return 0, hourErr
-	}
-	minute, minuteErr := p.parseInt64(targetMinutePart)
-	if minuteErr != nil {
-		return 0, minuteErr
-	}
-	second, secondErr := p.parseInt64(targetSecondPart)
-	if secondErr != nil {
-		return 0, secondErr
-	}
-
-	secondOfDayUnixTime := (hour * 3600) + (minute * 60) + second
-	return p.lastFullyParsedTimeStartOfTheDayUnixTime + secondOfDayUnixTime, nil
+	second := p.parseSecond(targetSecondPart)
+	return p.lastFullyParsedTimeStartOfTheDayUnixTime + second, nil
 }
 
 /*
@@ -235,11 +184,19 @@ func (p *LineToStoreRecordParser) regularTimeParse(timePart []byte) (int64, erro
 		return 0, parsingErr
 	}
 	p.lastFullyParsedTimeStartOfTheDayUnixTime = time.Date(
-		t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC,
+		t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC,
 	).Unix()
 	p.lastFullyParsedTimePart = make([]byte, len(timePart))
 	copy(p.lastFullyParsedTimePart, timePart)
 	return t.Unix(), nil
+}
+
+func (p *LineToStoreRecordParser) parseSecond(intPart []byte) int64 {
+	return int64(intPart[1]-'0') + (int64(intPart[0]-'0') * 10)
+}
+
+func (p *LineToStoreRecordParser) parseStatusCode(intPart []byte) int64 {
+	return int64(intPart[2]-'0') + (int64(intPart[1]-'0') * 10) + (int64(intPart[0]-'0') * 100)
 }
 
 /*
@@ -268,14 +225,11 @@ func (p *LineToStoreRecordParser) internSectionString(sectionPart []byte) string
 	}
 
 	sectionPartStr := *(*string)(unsafe.Pointer(&sectionPart)) // bytes to string without potential allocation
-	p.stringInternHash.Reset()
-	_, _ = p.stringInternHash.Write(sectionPart)
-	sectionHash := p.stringInternHash.Sum32()
-	partFromCache, ok := p.sectionPartsInternCache[sectionHash]
-	if ok && sectionPartStr == partFromCache {
+	partFromCache, ok := p.sectionPartsInternCache[sectionPartStr]
+	if ok {
 		return partFromCache
 	}
 	sectionString := string(sectionPart)
-	p.sectionPartsInternCache[sectionHash] = sectionString
+	p.sectionPartsInternCache[sectionString] = sectionString
 	return sectionString
 }

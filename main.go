@@ -77,7 +77,7 @@ func main() {
 		return
 	}
 
-	stopCh := make(chan os.Signal)
+	stopCh := make(chan os.Signal, 1)
 	defer close(stopCh)
 	signal.Notify(stopCh, syscall.SIGTERM, syscall.SIGINT)
 	<-stopCh

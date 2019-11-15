@@ -112,7 +112,7 @@ func waitForRecordTimeout(t *testing.T, storage *storageMock) {
 	var record stat.Record
 
 	select {
-	case record, _ = <-storage.records:
+	case record = <-storage.records:
 	case timeout = <-time.After(10 * time.Millisecond):
 	}
 	test.Equals(t, stat.Record{}, record, "read report")
@@ -139,12 +139,6 @@ func (r *fileReaderMock) setError(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.err = err
-}
-
-func (r *fileReaderMock) setPanic(p bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.pnc = p
 }
 
 func (r *fileReaderMock) ReadOneLineAsSlice() ([]byte, error) {

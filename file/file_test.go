@@ -20,12 +20,6 @@ func TestFileReader(t *testing.T) {
 	test.FailOnError(t, readerErr)
 	defer log.OnError(reader.Close, "can't close file reader")
 
-	{
-		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte(nil), line, "line should be empty")
-		test.Equals(t, io.EOF, lineErr, "file should be empty now")
-	}
-
 	appendToFile(t, tmpFile, []byte("first line"))
 	appendToFile(t, tmpFile, []byte("second line"))
 
@@ -39,32 +33,16 @@ func TestFileReader(t *testing.T) {
 		test.Equals(t, []byte("second line"), line, "can't read line")
 		test.FailOnError(t, lineErr)
 	}
-	{
-		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte(nil), line, "line should be empty")
-		test.Equals(t, io.EOF, lineErr, "file should be empty now")
-	}
 
 	test.FailOnError(t, tmpFile.Truncate(0))
 	_, seekErr := tmpFile.Seek(0, io.SeekStart)
 	test.FailOnError(t, seekErr)
-
-	{
-		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte(nil), line, "line should be empty")
-		test.Equals(t, io.EOF, lineErr, "file should be empty now")
-	}
 
 	appendToFile(t, tmpFile, []byte("third line"))
 	{
 		line, lineErr := reader.ReadOneLineAsSlice()
 		test.FailOnError(t, lineErr)
 		test.Equals(t, []byte("third line"), line, "can't read line")
-	}
-	{
-		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte(nil), line, "line should be empty")
-		test.Equals(t, io.EOF, lineErr, "file should be empty now")
 	}
 
 	bigLine := make([]byte, 2*lineBufSize+12)
@@ -75,11 +53,6 @@ func TestFileReader(t *testing.T) {
 		line, lineErr := reader.ReadOneLineAsSlice()
 		test.Equals(t, []byte(stringLikeLine), line, "can't read line")
 		test.FailOnError(t, lineErr)
-	}
-	{
-		line, lineErr := reader.ReadOneLineAsSlice()
-		test.Equals(t, []byte(nil), line, "line should be empty")
-		test.Equals(t, io.EOF, lineErr, "file should be empty now")
 	}
 }
 
